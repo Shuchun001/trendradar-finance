@@ -35,29 +35,59 @@ on:
     #   "15 * * * *"     → 每小时第15分钟 / minute 15 every hour
     #   "30 0-14 * * *"  → 北京时间 8:00-22:00 每小时第30分钟 / Beijing 8am-10pm
     #
+    # 正式：每天 UTC 00:50 = 北京 08:50
     - cron: "50 0 * * *"
+    # 临时验证：每 10 分钟只跑 probe 任务，不抓取不推送（验证后删掉这一行）
+    - cron: "*/10 * * * *"
 
   workflow_dispatch:
 
 concurrency:
-  group: crawler-${{ github.ref_name }}
-  cancel-in-progress: true
+  group: crawler-${{ github.repository }}
+  cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 jobs:
+  probe:
+    name: schedule-probe
+    if: github.event_name == 'schedule' && github.event.schedule == '*/10 * * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log schedule probe
+        run: |
+          date -u
+          echo "probe ok: event=${{ github.event_name }} cron=${{ github.event.schedule }} ref=${{ github.ref_name }}"
+
   crawl:
+    name: crawl
+    if: github.event_name != 'schedule' || github.event.schedule != '*/10 * * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
+      - name: Instrument (branch / event / git)
+        run: |
+          date -u
+          echo "event_name=${{ github.event_name }}"
+          echo "ref_name=${{ github.ref_name }}"
+          echo "default_branch=${{ github.event.repository.default_branch }}"
+          echo "schedule=${{ github.event.schedule }}"
+
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          fetch-depth: 1
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
           clean: true
+
+      - name: Show git state
+        run: |
+          git status --short
+          git branch --show-current
+          git log -1 --oneline
 
       - name: Check Expiration
         env:
@@ -168,6 +198,30 @@ jobs:
           S3_REGION: ${{ secrets.S3_REGION }}
           GITHUB_ACTIONS: true
         run: uv run python -m trendradar
+
+      # --------------------------------------------------------------------------------
+      # COMMIT REPORT / 把生成好的报告提交回仓库（失败不影响飞书推送）
+      # --------------------------------------------------------------------------------
+      - name: Commit generated report
+        if: success()
+        continue-on-error: true
+        env:
+          TARGET_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A output/html/latest index.html 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "no report changes to commit"
+            exit 0
+          fi
+
+          git commit -m "chore: update report $(date -u +%Y-%m-%dT%H:%MZ)"
+          git pull --rebase origin "${TARGET_BRANCH}"
+          git push origin "HEAD:${TARGET_BRANCH}"
+          echo "report pushed to ${TARGET_BRANCH}"
 
       # --------------------------------------------------------------------------------
       # ☁️ CLOUDFLARE PAGES DEPLOY / 部署到 Cloudflare Pages（可选）
