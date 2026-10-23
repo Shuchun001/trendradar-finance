@@ -37,8 +37,6 @@ on:
     #
     # 正式：每天 UTC 00:50 = 北京 08:50
     - cron: "50 0 * * *"
-    # 临时验证：每 10 分钟只跑 probe 任务，不抓取不推送（验证后删掉这一行）
-    - cron: "*/10 * * * *"
 
   workflow_dispatch:
 
@@ -51,19 +49,8 @@ permissions:
   actions: write
 
 jobs:
-  probe:
-    name: schedule-probe
-    if: github.event_name == 'schedule' && github.event.schedule == '*/10 * * * *'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Log schedule probe
-        run: |
-          date -u
-          echo "probe ok: event=${{ github.event_name }} cron=${{ github.event.schedule }} ref=${{ github.ref_name }}"
-
   crawl:
     name: crawl
-    if: github.event_name != 'schedule' || github.event.schedule != '*/10 * * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
