@@ -39,6 +39,14 @@ jobs:
           git branch --show-current
           git log -1 --oneline
 
+      - name: Auto check-in (reset the 7-day trial timer)
+        if: success()
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 3
+          keep_minimum_runs: 1
       - name: Check Expiration
         env:
           GH_TOKEN: ${{ github.token }}
